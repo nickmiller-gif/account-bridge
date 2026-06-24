@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Account Bridge — Vanilla Web Components</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: #0a0d12;
+        color: #f1f5f9;
+        min-height: 100vh;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 2rem 1.5rem 4rem;
+      }
+      h1 {
+        font-size: 1.75rem;
+        margin-bottom: 0.5rem;
+      }
+      p.lede {
+        color: #94a3b8;
+        margin-bottom: 2rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Account Bridge 2.0 — Web Components</h1>
+      <p class="lede">
+        Framework-agnostic embed using <code>&lt;account-bridge-embed&gt;</code> with local encrypted
+        storage. Connect an API key below, then chat.
+      </p>
+
+      <account-bridge-embed
+        app-id="vanilla-demo"
+        transport="local"
+        mode="full"
+        theme="dark"
+      ></account-bridge-embed>
+    </main>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

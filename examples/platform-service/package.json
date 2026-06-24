@@ -1,0 +1,13 @@
+{
+  "name": "account-bridge-platform-service",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@account-bridge/platform": "3.1.0",
+    "@account-bridge/server": "3.0.0",
+    "express": "^4.21.2"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "account-bridge-vercel-ai-demo",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@account-bridge/adapters": "3.0.0"
+  }
+}

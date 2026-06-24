@@ -1,0 +1,44 @@
+export const SUPABASE_SQL_MIGRATION = `-- Supabase reference migration for Account Bridge v0.3
+CREATE TABLE IF NOT EXISTS public.account_bridge_credentials (
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  provider_id text NOT NULL,
+  encrypted_payload bytea NOT NULL,
+  auth_kind text NOT NULL DEFAULT 'api_key' CHECK (auth_kind IN ('api_key', 'oauth')),
+  validated_at timestamptz NOT NULL DEFAULT now(),
+  default_model text,
+  label text,
+  PRIMARY KEY (user_id, provider_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.account_bridge_preferences (
+  user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  default_provider_id text
+);
+
+ALTER TABLE public.account_bridge_credentials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.account_bridge_preferences ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY account_bridge_credentials_select ON public.account_bridge_credentials
+  FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY account_bridge_credentials_insert ON public.account_bridge_credentials
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY account_bridge_credentials_update ON public.account_bridge_credentials
+  FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY account_bridge_credentials_delete ON public.account_bridge_credentials
+  FOR DELETE USING (auth.uid() = user_id);
+CREATE POLICY account_bridge_preferences_all ON public.account_bridge_preferences
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+`;
+
+export const EDGE_OAUTH_CALLBACK_TEMPLATE = `import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+
+Deno.serve(async (req) => {
+  const url = new URL(req.url);
+  const bridgeServer = Deno.env.get("ACCOUNT_BRIDGE_SERVER_URL");
+  if (!bridgeServer) {
+    return new Response(JSON.stringify({ error: "ACCOUNT_BRIDGE_SERVER_URL not set" }), { status: 500 });
+  }
+  const res = await fetch(\`\${bridgeServer}/account-bridge/oauth/google/callback?\${url.searchParams}\`);
+  return res;
+});
+`;

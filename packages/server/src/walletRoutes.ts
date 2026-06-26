@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from 'express';
 
 import type { FundingPolicy, WalletStore } from '@account-bridge/core';
-import { assertHostSessionToken } from '@account-bridge/core';
+import { assertHostSessionToken, ConsumerCreditsRequiredError } from '@account-bridge/core';
 import {
   createStripeCheckoutSession,
   DEFAULT_CREDIT_PACKS,
@@ -24,18 +24,26 @@ export function mountAccountBridgeWalletRoutes(options: MountWalletRoutesOptions
   const prefix = options.apiPrefix ?? '/account-bridge';
   const enforce = options.enforceConsumerCredits !== false;
 
-  async function resolveUserId(req: Request): Promise<string | null> {
-    const authHeader = String(req.headers.authorization ?? '');
-    if (enforce && authHeader.startsWith('Bearer ')) {
-      assertHostSessionToken(authHeader.slice('Bearer '.length).trim());
+  async function resolveUserId(req: Request, res: Response): Promise<string | null> {
+    try {
+      const authHeader = String(req.headers.authorization ?? '');
+      if (enforce && authHeader.startsWith('Bearer ')) {
+        assertHostSessionToken(authHeader.slice('Bearer '.length).trim());
+      }
+      return options.resolveUser(req);
+    } catch (err) {
+      if (err instanceof ConsumerCreditsRequiredError) {
+        res.status(403).json({ error: err.message });
+        return null;
+      }
+      throw err;
     }
-    return options.resolveUser(req);
   }
 
   options.app.get(`${prefix}/wallet/balance`, async (req, res) => {
-    const userId = await resolveUserId(req);
+    const userId = await resolveUserId(req, res);
     if (!userId) {
-      res.status(401).json({ error: 'Unauthorized' });
+      if (!res.headersSent) res.status(401).json({ error: 'Unauthorized' });
       return;
     }
     const balance = await options.wallet.getBalance(userId, options.appId);
@@ -56,9 +64,9 @@ export function mountAccountBridgeWalletRoutes(options: MountWalletRoutesOptions
   });
 
   options.app.post(`${prefix}/wallet/checkout`, async (req, res) => {
-    const userId = await resolveUserId(req);
+    const userId = await resolveUserId(req, res);
     if (!userId) {
-      res.status(401).json({ error: 'Unauthorized' });
+      if (!res.headersSent) res.status(401).json({ error: 'Unauthorized' });
       return;
     }
     if (!options.stripe) {
@@ -117,9 +125,9 @@ export function mountAccountBridgeWalletRoutes(options: MountWalletRoutesOptions
   });
 
   options.app.post(`${prefix}/wallet/credit`, async (req, res) => {
-    const userId = await resolveUserId(req);
+    const userId = await resolveUserId(req, res);
     if (!userId) {
-      res.status(401).json({ error: 'Unauthorized' });
+      if (!res.headersSent) res.status(401).json({ error: 'Unauthorized' });
       return;
     }
     if (process.env.NODE_ENV === 'production') {

@@ -8,12 +8,14 @@ export const DEMO_PORTS = {
   vite: Number(process.env.DEMO_VITE_PORT ?? 5175),
   wallet: Number(process.env.DEMO_WALLET_PORT ?? 3456),
   proxy: Number(process.env.DEMO_PROXY_PORT ?? 3920),
+  platform: Number(process.env.DEMO_PLATFORM_PORT ?? 3460),
 };
 
 export const DEMO_URLS = {
   vite: `http://127.0.0.1:${DEMO_PORTS.vite}`,
   wallet: `http://127.0.0.1:${DEMO_PORTS.wallet}`,
   proxy: `http://127.0.0.1:${DEMO_PORTS.proxy}`,
+  platform: `http://127.0.0.1:${DEMO_PORTS.platform}`,
 };
 
 export async function fileExists(filePath) {

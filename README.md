@@ -2,6 +2,22 @@
 
 Generic **bring-your-own-key (BYOK)** + **app credits wallet** plugin for any app. End users fund AI usage—the host developer does not pay for model calls.
 
+## What's new in v3.3
+
+- **Production guardrails** — `demoMode: false` requires real `resolveConsumerUser`; signup rate limits; sanitized errors
+- **Quota fixes** — account-wide live enforcement; usage only on successful responses; `past_due` blocked
+- **Validation** — email/slug/funding policy; reserved slugs; atomic file store writes
+
+See [`CHANGELOG.md`](CHANGELOG.md#330--2026-06-24).
+
+## What's new in v3.2
+
+- **App lifecycle API** — `PATCH /apps/:slug`, rotate secret, usage metrics on `/me`
+- **Live tenant funding** — policy updates apply without restart (`resolveFundingPolicy`)
+- **Host dashboard** — usage bars, funding selector, copy embed, demo tenant banner
+
+See [`CHANGELOG.md`](CHANGELOG.md#320--2026-06-24).
+
 ## What's new in v3.1
 
 - **Platform SaaS** — `@account-bridge/platform` + `mountPlatformService` for multi-tenant hosted API

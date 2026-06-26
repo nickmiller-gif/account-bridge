@@ -13,13 +13,14 @@
     "smoke": "node scripts/smoke-integration.mjs && node scripts/smoke-file-storage.mjs && node scripts/smoke-wallet.mjs && node scripts/smoke-wallet-host.mjs && node scripts/smoke-proxy.mjs && node scripts/smoke-platform.mjs",
     "smoke:wallet-host": "node scripts/smoke-wallet-host.mjs",
     "smoke:platform": "node scripts/smoke-platform.mjs",
+    "audit:security": "node scripts/audit-platform-security.mjs",
     "demo": "node scripts/demo-walkthrough.mjs",
     "demo:platform": "node scripts/demo-platform.mjs",
     "demo:screenshots": "node scripts/demo-screenshots.mjs",
     "smoke:wallet": "node scripts/smoke-wallet.mjs",
     "smoke:proxy": "node scripts/smoke-proxy.mjs",
     "typecheck": "npm run build -w @account-bridge/core && npm run build -w @account-bridge/platform && npm run build -w @account-bridge/billing && npm run build -w @account-bridge/ui && npm run build -w @account-bridge/gateway && npm run build -w @account-bridge/adapters && npm run build -w @account-bridge/server && npm run build -w @account-bridge/react && npm run build -w @account-bridge/web && npm run build -w @account-bridge/overlay && npm run build -w @account-bridge/proxy && npm run typecheck --workspaces --if-present",
-    "check": "npm run typecheck && npm run test && npm run smoke && npm run build"
+    "check": "npm run typecheck && npm run test && npm run smoke && npm run audit:security && npm run build"
   },
   "engines": {
     "node": ">=18"

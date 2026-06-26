@@ -50,6 +50,7 @@ export function configFromElement(el: HTMLElement): AccountBridgeEmbedConfig {
     fundingPolicy: parseFundingPolicy(el),
     authToken: el.getAttribute('auth-token') ?? undefined,
     authHeaderName: el.getAttribute('auth-header-name') ?? undefined,
+    publishableKey: el.getAttribute('publishable-key') ?? undefined,
   };
 }
 
@@ -101,6 +102,7 @@ export function createBridgeFromConfig(
       apiPrefix: config.apiPrefix,
       oauthBasePath: config.oauthBasePath,
       gatewayPath: config.gatewayPath,
+      publishableKey: config.publishableKey,
       ...providerOptions,
     });
   }

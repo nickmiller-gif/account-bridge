@@ -64,6 +64,19 @@ export interface CreateAppResult {
   secretKey: string;
 }
 
+export interface UpdateAppParams {
+  hostId: string;
+  slug: string;
+  displayName?: string;
+  fundingPolicy?: FundingPolicy;
+}
+
+export interface RotateAppSecretResult {
+  app: PlatformApp;
+  /** Shown once — previous secret is invalidated */
+  secretKey: string;
+}
+
 export interface PlatformStore {
   createHost(params: CreateHostParams): Promise<CreateHostResult>;
   findHostByToken(hostToken: string): Promise<PlatformHost | null>;
@@ -74,6 +87,8 @@ export interface PlatformStore {
   ): Promise<PlatformHost>;
 
   createApp(params: CreateAppParams): Promise<CreateAppResult>;
+  updateApp(params: UpdateAppParams): Promise<PlatformApp>;
+  rotateAppSecret(hostId: string, slug: string): Promise<RotateAppSecretResult>;
   listAppsForHost(hostId: string): Promise<PlatformApp[]>;
   findAppBySlug(slug: string): Promise<PlatformApp | null>;
   findAppByPublishableKey(publishableKey: string): Promise<PlatformApp | null>;

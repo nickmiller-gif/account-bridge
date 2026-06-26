@@ -4,6 +4,7 @@ import type { AccountBridge, FundingPolicy, HostKeyPool, ProviderId, WalletStore
 import {
   assertHostSessionToken,
   assertNoInlineProviderKey,
+  ConsumerCreditsRequiredError,
   ConsumerFundingRequiredError,
   resolveFundingSource,
 } from '@account-bridge/core';
@@ -20,6 +21,7 @@ export interface MountHostRoutesOptions {
   /** Reject provider API keys on connect/chat routes (default true) */
   enforceConsumerCredits?: boolean;
   fundingPolicy?: FundingPolicy;
+  resolveFundingPolicy?: () => Promise<FundingPolicy> | FundingPolicy;
   wallet?: WalletStore;
   hostKeyPool?: HostKeyPool;
   appId?: string;
@@ -33,6 +35,13 @@ export function mountAccountBridgeHostRoutes(options: MountHostRoutesOptions): v
   const prefix = options.apiPrefix ?? '/account-bridge';
   const enforce = options.enforceConsumerCredits !== false;
 
+  async function resolveFundingPolicy(): Promise<FundingPolicy> {
+    if (options.resolveFundingPolicy) {
+      return options.resolveFundingPolicy();
+    }
+    return options.fundingPolicy ?? { mode: 'byok' };
+  }
+
   async function userBridge(req: Request): Promise<{ userId: string; bridge: AccountBridge } | null> {
     const authHeader = String(req.headers.authorization ?? '');
     if (enforce && authHeader.startsWith('Bearer ')) {
@@ -45,6 +54,21 @@ export function mountAccountBridgeHostRoutes(options: MountHostRoutesOptions): v
     const userId = await options.resolveUser(req);
     if (!userId) return null;
     return { userId, bridge: options.createBridge(userId) };
+  }
+
+  async function userBridgeOrRespond(
+    req: Request,
+    res: Response,
+  ): Promise<{ userId: string; bridge: AccountBridge } | null> {
+    try {
+      return await userBridge(req);
+    } catch (err) {
+      if (err instanceof ConsumerCreditsRequiredError) {
+        res.status(403).json({ error: err.message });
+        return null;
+      }
+      throw err;
+    }
   }
 
   options.app.post(`${prefix}/connect`, async (req, res) => {
@@ -84,9 +108,9 @@ export function mountAccountBridgeHostRoutes(options: MountHostRoutesOptions): v
   });
 
   options.app.delete(`${prefix}/connect/:provider`, async (req, res) => {
-    const ctx = await userBridge(req);
+    const ctx = await userBridgeOrRespond(req, res);
     if (!ctx) {
-      res.status(401).json({ error: 'Unauthorized' });
+      if (!res.headersSent) res.status(401).json({ error: 'Unauthorized' });
       return;
     }
     await ctx.bridge.disconnect(String(req.params.provider));
@@ -94,9 +118,9 @@ export function mountAccountBridgeHostRoutes(options: MountHostRoutesOptions): v
   });
 
   options.app.get(`${prefix}/providers`, async (req, res) => {
-    const ctx = await userBridge(req);
+    const ctx = await userBridgeOrRespond(req, res);
     if (!ctx) {
-      res.status(401).json({ error: 'Unauthorized' });
+      if (!res.headersSent) res.status(401).json({ error: 'Unauthorized' });
       return;
     }
     const providers = await ctx.bridge.listProviders();
@@ -105,9 +129,9 @@ export function mountAccountBridgeHostRoutes(options: MountHostRoutesOptions): v
   });
 
   options.app.get(`${prefix}/status`, async (req, res) => {
-    const ctx = await userBridge(req);
+    const ctx = await userBridgeOrRespond(req, res);
     if (!ctx) {
-      res.status(401).json({ error: 'Unauthorized' });
+      if (!res.headersSent) res.status(401).json({ error: 'Unauthorized' });
       return;
     }
     const defaultProvider = await ctx.bridge.getDefaultProvider();
@@ -117,7 +141,7 @@ export function mountAccountBridgeHostRoutes(options: MountHostRoutesOptions): v
       const bal = await options.wallet.getBalance(ctx.userId, options.appId);
       walletBalance = bal.balanceMicrocredits;
     }
-    const fundingPolicy = options.fundingPolicy ?? { mode: 'byok' };
+    const fundingPolicy = await resolveFundingPolicy();
     const { ready, walletEnabled } = computeFundingStatus({
       fundingPolicy,
       defaultProvider,
@@ -136,9 +160,9 @@ export function mountAccountBridgeHostRoutes(options: MountHostRoutesOptions): v
   });
 
   options.app.post(`${prefix}/preferences/default-provider`, async (req, res) => {
-    const ctx = await userBridge(req);
+    const ctx = await userBridgeOrRespond(req, res);
     if (!ctx) {
-      res.status(401).json({ error: 'Unauthorized' });
+      if (!res.headersSent) res.status(401).json({ error: 'Unauthorized' });
       return;
     }
     const { providerId } = req.body as { providerId?: ProviderId | null };
@@ -166,10 +190,11 @@ export function mountAccountBridgeHostRoutes(options: MountHostRoutesOptions): v
     messageCount = 1,
   ) {
     const appId = options.appId ?? 'default';
-    const estimate = estimatePromptMicrocredits(messageCount, 200, options.fundingPolicy?.pricing);
+    const fundingPolicy = await resolveFundingPolicy();
+    const estimate = estimatePromptMicrocredits(messageCount, 200, fundingPolicy?.pricing);
     const funding = await resolveFundingSource({
       bridge: ctx.bridge,
-      policy: options.fundingPolicy,
+      policy: fundingPolicy,
       wallet: options.wallet,
       hostKeyPool: options.hostKeyPool,
       appId,
@@ -182,9 +207,10 @@ export function mountAccountBridgeHostRoutes(options: MountHostRoutesOptions): v
 
   async function walletDebitPricing(providerId: ProviderId, model?: string) {
     const appId = options.appId ?? 'default';
+    const fundingPolicy = await resolveFundingPolicy();
     return resolveWalletDebitPricing(
       options.walletPricingLoader,
-      options.fundingPolicy?.pricing,
+      fundingPolicy?.pricing,
       appId,
       providerId,
       model,

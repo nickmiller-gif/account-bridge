@@ -27,4 +27,15 @@ describe('configFromElement', () => {
     expect(config.theme).toBe('dark');
     expect(config.mode).toBeUndefined();
   });
+
+  it('reads publishable-key and funding-mode attributes', () => {
+    const el = document.createElement('account-bridge-embed');
+    el.setAttribute('publishable-key', 'ab_pk_test');
+    el.setAttribute('funding-mode', 'auto');
+    el.setAttribute('wallet-enabled', 'true');
+
+    const config = configFromElement(el);
+    expect(config.publishableKey).toBe('ab_pk_test');
+    expect(config.fundingPolicy).toEqual({ mode: 'auto', wallet: { enabled: true } });
+  });
 });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Smoke: examples/platform-service — signup, create app, tenant status with publishable key.
+ * Smoke: examples/platform-service — demo tenant wallet chat, signup, create app, tenant status.
  */
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -18,7 +18,8 @@ const child = spawn('node', ['server.mjs'], {
     ...process.env,
     PORT: '0',
     HOST: '127.0.0.1',
-    PLATFORM_SEED_DEMO: '0',
+    PLATFORM_SEED_DEMO: '1',
+    DEMO_MOCK_AI: '1',
   },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
@@ -52,6 +53,61 @@ try {
   }
 
   await waitForHttpOk(`${baseUrl}/platform/v1/health`, { timeoutMs: 15_000 });
+
+  const demoRes = await fetch(`${baseUrl}/platform/v1/demo-tenant`);
+  if (!demoRes.ok) {
+    console.error('smoke:platform FAIL — demo-tenant', demoRes.status, await demoRes.text());
+    shutdown(1);
+  }
+  const demo = await demoRes.json();
+  if (!demo.publishableKey?.startsWith('ab_pk_') || !demo.tenantBaseUrl) {
+    console.error('smoke:platform FAIL — demo tenant payload', demo);
+    shutdown(1);
+  }
+
+  const tenantHealth = await fetch(`${demo.tenantBaseUrl}/health`, {
+    headers: { 'X-Account-Bridge-Publishable-Key': demo.publishableKey },
+  });
+  if (!tenantHealth.ok) {
+    console.error('smoke:platform FAIL — tenant health', tenantHealth.status);
+    shutdown(1);
+  }
+
+  const tenantHeaders = {
+    Authorization: `Bearer ${demo.demoConsumer ?? 'demo-consumer'}`,
+    'X-Account-Bridge-Publishable-Key': demo.publishableKey,
+  };
+
+  const demoStatusRes = await fetch(`${demo.tenantBaseUrl}/account-bridge/status`, {
+    headers: tenantHeaders,
+  });
+  if (!demoStatusRes.ok) {
+    console.error('smoke:platform FAIL — demo tenant status', demoStatusRes.status, await demoStatusRes.text());
+    shutdown(1);
+  }
+  const demoStatus = await demoStatusRes.json();
+  if (!demoStatus.ready || !demoStatus.walletEnabled) {
+    console.error('smoke:platform FAIL — demo funding not ready', demoStatus);
+    shutdown(1);
+  }
+
+  const chatRes = await fetch(`${demo.tenantBaseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { ...tenantHeaders, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: 'platform smoke' }],
+    }),
+  });
+  if (!chatRes.ok) {
+    console.error('smoke:platform FAIL — demo tenant chat', chatRes.status, await chatRes.text());
+    shutdown(1);
+  }
+  const chat = await chatRes.json();
+  const content = chat.choices?.[0]?.message?.content ?? '';
+  if (!String(content).startsWith('Demo wallet reply:')) {
+    console.error('smoke:platform FAIL — unexpected chat reply', content);
+    shutdown(1);
+  }
 
   const signupRes = await fetch(`${baseUrl}/platform/v1/signup`, {
     method: 'POST',
@@ -110,6 +166,50 @@ try {
   });
   if (!meRes.ok) {
     console.error('smoke:platform FAIL — me', meRes.status);
+    shutdown(1);
+  }
+  const me = await meRes.json();
+  if (!me.usage?.monthlyRequestLimit || !Array.isArray(me.apps)) {
+    console.error('smoke:platform FAIL — me usage payload', me);
+    shutdown(1);
+  }
+
+  const patchRes = await fetch(`${baseUrl}/platform/v1/apps/${created.app.slug}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${hostToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ displayName: 'Smoke App Updated' }),
+  });
+  if (!patchRes.ok) {
+    console.error('smoke:platform FAIL — patch app', patchRes.status, await patchRes.text());
+    shutdown(1);
+  }
+  const patched = await patchRes.json();
+  if (patched.app?.displayName !== 'Smoke App Updated') {
+    console.error('smoke:platform FAIL — patch response', patched);
+    shutdown(1);
+  }
+
+  const badTenantRes = await fetch(`${tenantBase}/account-bridge/status`, {
+    headers: { Authorization: 'Bearer smoke-consumer' },
+  });
+  if (badTenantRes.status !== 401) {
+    console.error('smoke:platform FAIL — expected 401 without publishable key', badTenantRes.status);
+    shutdown(1);
+  }
+
+  const reservedRes = await fetch(`${baseUrl}/platform/v1/apps`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${hostToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ slug: 'platform', displayName: 'Bad' }),
+  });
+  if (reservedRes.status !== 400) {
+    console.error('smoke:platform FAIL — reserved slug should 400', reservedRes.status);
     shutdown(1);
   }
 

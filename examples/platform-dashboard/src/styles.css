@@ -142,3 +142,72 @@ button:disabled {
 .snippet {
   margin-top: 0.75rem;
 }
+
+select {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #0b1220;
+  color: var(--text);
+  margin-bottom: 0.75rem;
+}
+
+.banner {
+  margin-top: 1.25rem;
+  border-color: rgba(94, 234, 212, 0.35);
+}
+
+.banner a {
+  color: var(--accent);
+}
+
+.usage {
+  margin: 0.75rem 0 1rem;
+}
+
+.usage__label {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+.usage__track {
+  height: 8px;
+  border-radius: 999px;
+  background: #0b1220;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.usage__fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2dd4bf, #5eead4);
+}
+
+.usage__meta {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.app-row {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-row:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0.75rem;
+}

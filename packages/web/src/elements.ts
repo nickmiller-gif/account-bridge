@@ -236,7 +236,17 @@ export class AccountBridgeCopilotElement extends HTMLElement {
 }
 
 export class AccountBridgeEmbedElement extends HTMLElement {
-  static observedAttributes = ['app-id', 'mode', 'transport', 'theme', 'copilot-provider-id'];
+  static observedAttributes = [
+    'app-id',
+    'mode',
+    'transport',
+    'theme',
+    'copilot-provider-id',
+    'base-url',
+    'publishable-key',
+    'funding-mode',
+    'wallet-enabled',
+  ];
 
   private themeWrap: HTMLDivElement | null = null;
   private settingsHost: HTMLDivElement | null = null;

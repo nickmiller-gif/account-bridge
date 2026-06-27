@@ -32,8 +32,8 @@ npm run demo
 | Plan | Price | Apps | Requests / month |
 |------|-------|------|------------------|
 | Free | $0 | 1 | 5,000 |
-| Pro | $49 | 5 | 50,000 |
-| Business | $199 | 25 | 500,000 |
+| Pro | $49 | 5 | 100,000 |
+| Business | $199 | 25 | 1,000,000 |
 
 Limits enforced at the tenant router (`429` when exceeded).
 
@@ -52,6 +52,8 @@ Base: `{origin}/platform/v1`
 | POST | `/signup` | `{ email, name }` → `{ hostToken, host }` |
 | GET | `/me` | Host profile + apps |
 | POST | `/apps` | `{ slug, displayName, fundingPolicy? }` → `{ app, secretKey }` |
+| PATCH | `/apps/:slug` | `{ displayName?, fundingPolicy? }` → `{ app }` |
+| POST | `/apps/:slug/rotate-secret` | Rotate server secret → `{ app, secretKey }` |
 | POST | `/billing/checkout` | `{ planId: "pro" \| "business" }` → Stripe Checkout URL |
 | POST | `/billing/webhook` | Stripe subscription events (raw body) |
 
@@ -130,6 +132,11 @@ Exit gate: `npm run check` includes platform smoke.
 
 ## Security notes
 
-- **Never** expose `ab_sk_…` or `ab_host_…` in browser bundles.
-- Rotate keys by creating a new app or extending the store with key rotation.
+- **Tenant routes:** every path under `/t/{slug}` — including `/health` — requires `X-Account-Bridge-Publishable-Key` or `Bearer ab_sk_…`.
+- **Production:** set `demoMode: false` on `mountPlatformService` and implement `resolveConsumerUser` (JWT/session validation). Demo bearer headers are rejected without `demoMode: true`.
+- **Quotas:** enforced account-wide per host (sum of all app usage vs plan `maxMonthlyRequests`). Usage increments only on successful responses (`status < 400`).
+- **Signup:** rate-limited per IP; duplicate emails return a generic error (no enumeration).
+- **Input validation:** email format, slug length/reserved words, strict funding policy JSON.
+- **File store:** atomic writes with `0600` permissions — still not a substitute for SQL + encrypted secrets at rest in production.
+- Rotate keys by creating a new app or `POST /platform/v1/apps/:slug/rotate-secret`.
 - Demo servers bind `127.0.0.1` and refuse `NODE_ENV=production`.

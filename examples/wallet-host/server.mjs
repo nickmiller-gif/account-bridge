@@ -4,6 +4,7 @@ import { memoryWalletStore } from '@account-bridge/billing';
 import { mountAccountBridgeHost } from '@account-bridge/server';
 
 import { createDemoCorsMiddleware } from '../shared/demo-cors.mjs';
+import { createDemoHostKeyPool } from '../shared/demo-mock-ai.mjs';
 
 if (process.env.NODE_ENV === 'production') {
   console.error('[wallet-host] Refusing to start demo server in NODE_ENV=production');
@@ -43,43 +44,6 @@ app.get('/health', (_req, res) => {
     demoOnly: true,
   });
 });
-
-/** Demo pool — canned completions for walkthrough (no real provider key). */
-function createDemoHostKeyPool() {
-  const replyFor = (messages) => {
-    const last = messages.at(-1)?.content ?? '';
-    return `Demo wallet reply: you said "${last}"`;
-  };
-
-  return {
-    has(id) {
-      return id === 'openai' || id === 'anthropic' || id === 'gemini';
-    },
-    async resolveClient(providerId) {
-      const id =
-        providerId === 'openai' || providerId === 'anthropic' || providerId === 'gemini'
-          ? providerId
-          : 'openai';
-      return {
-        providerId: id,
-        client: {
-          async complete(messages) {
-            const content = replyFor(messages);
-            return {
-              content,
-              model: 'demo-wallet',
-              usage: { inputTokens: 12, outputTokens: content.length },
-            };
-          },
-          async *stream(messages) {
-            const text = replyFor(messages);
-            for (const ch of text) yield ch;
-          },
-        },
-      };
-    },
-  };
-}
 
 mountAccountBridgeHost({
   app,

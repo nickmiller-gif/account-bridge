@@ -31,6 +31,8 @@ export interface AccountBridgeGatewayOptions {
   appId?: string;
   /** Consumer funding policy */
   fundingPolicy?: FundingPolicy;
+  /** Live policy lookup (e.g. platform tenant reload from store) */
+  resolveFundingPolicy?: () => Promise<FundingPolicy> | FundingPolicy;
   /** Wallet ledger (required for wallet/auto modes) */
   wallet?: WalletStore;
   /** Server-only host key pool for wallet-funded requests */
@@ -96,9 +98,16 @@ export function createAccountBridgeGatewayHandlers(options: AccountBridgeGateway
   const basePath = (options.basePath ?? '').replace(/\/$/, '');
   const enforce = options.enforceConsumerCredits !== false;
   const appId = options.appId ?? 'default';
-  const fundingPolicy = options.fundingPolicy;
 
-  async function walletDebitPricing(providerId: ProviderId, model?: string) {
+  async function resolveFundingPolicy(): Promise<FundingPolicy> {
+    if (options.resolveFundingPolicy) {
+      return options.resolveFundingPolicy();
+    }
+    return options.fundingPolicy ?? { mode: 'byok' };
+  }
+
+  async function walletDebitPricing(providerId: ProviderId, model?: string, policy?: FundingPolicy) {
+    const fundingPolicy = policy ?? (await resolveFundingPolicy());
     return resolveWalletDebitPricing(
       options.walletPricingLoader,
       fundingPolicy?.pricing,
@@ -161,6 +170,7 @@ export function createAccountBridgeGatewayHandlers(options: AccountBridgeGateway
         const bridge = options.createBridge(userId);
         const headerProvider = req.headers[PROVIDER_HEADER] as string | undefined;
         const defaultProvider = headerProvider ?? (await bridge.getDefaultProvider());
+        const fundingPolicy = await resolveFundingPolicy();
         if (!defaultProvider && fundingPolicy?.mode === 'byok') {
           openAiError(res, 403, 'No connected provider', 'permission_error');
           return true;
@@ -216,6 +226,7 @@ export function createAccountBridgeGatewayHandlers(options: AccountBridgeGateway
 
         const bridge = options.createBridge(userId);
         const headerProvider = req.headers[PROVIDER_HEADER] as ProviderId | undefined;
+        const fundingPolicy = await resolveFundingPolicy();
         const estimate = estimatePromptMicrocredits(messages.length, 200, fundingPolicy?.pricing);
 
         const funding = await resolveFundingSource({
@@ -240,7 +251,7 @@ export function createAccountBridgeGatewayHandlers(options: AccountBridgeGateway
 
         if (body.stream && client.stream) {
           const inputChars = messages.reduce((sum, m) => sum + m.content.length, 0);
-          const streamPricing = await walletDebitPricing(providerId, body.model);
+          const streamPricing = await walletDebitPricing(providerId, body.model, fundingPolicy);
           const streamTiming = options.walletStreamDebit;
 
           if (source === 'wallet' && options.wallet) {
@@ -317,7 +328,7 @@ export function createAccountBridgeGatewayHandlers(options: AccountBridgeGateway
               providerId,
             },
             idempotencyKey: reqIdempotency,
-            pricing: await walletDebitPricing(providerId, result.model),
+            pricing: await walletDebitPricing(providerId, result.model, fundingPolicy),
           });
         }
 

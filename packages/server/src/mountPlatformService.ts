@@ -7,17 +7,29 @@ import {
   handlePlatformSubscriptionWebhook,
   type PlatformStripeConfig,
 } from '@account-bridge/billing';
-import { createServerBridgeFactory } from '@account-bridge/core/node';
+import type { HostKeyPool, WalletStore } from '@account-bridge/core';
+import { createHostKeyPool, createServerBridgeFactory, resolveHostProviders } from '@account-bridge/core/node';
 import {
   getPlan,
   planAllowsRequest,
   PLATFORM_PLANS,
+  appUsageSummary,
+  hostMonthlyRequestCount,
+  parseFundingPolicyInput,
+  usageFromCount,
+  validateAppDisplayName,
+  validateHostDisplayName,
+  validatePlatformEmail,
   type PlatformApp,
   type PlatformStore,
   type PlanId,
 } from '@account-bridge/platform';
 
+import { resolveDemoConsumerUser } from './demoConsumerAuth.js';
+import { clientIp, createMemoryRateLimit } from './memoryRateLimit.js';
 import { mountAccountBridgeHostRoutes } from './hostRoutes.js';
+import { platformClientError } from './platformSafeError.js';
+import { mountAccountBridgeWalletRoutes } from './walletRoutes.js';
 import { stripeWebhookRawBody } from './stripeWebhook.js';
 
 export interface MountPlatformServiceOptions {
@@ -26,7 +38,20 @@ export interface MountPlatformServiceOptions {
   /** Public origin, e.g. https://api.accountbridge.dev */
   baseUrl: string;
   stripe?: PlatformStripeConfig;
-  /** Demo consumer auth — replace with host JWT validation in production */
+  /** Shared wallet ledger for tenant apps (keyed by app slug + user id). */
+  tenantWallet?: WalletStore;
+  /** Host pool keys for wallet/auto tenant funding. */
+  tenantHostKeyPool?: HostKeyPool;
+  /**
+   * When true, allows demo consumer auth (`Bearer` session / `X-Demo-User`).
+   * Production hosts must set false and supply `resolveConsumerUser`.
+   */
+  demoMode?: boolean;
+  /** Max JSON body size for platform + tenant routers (default 256kb). */
+  jsonBodyLimit?: string;
+  /** Signups allowed per IP per hour (default 20 in demo, 6 otherwise). */
+  signupRateLimitPerHour?: number;
+  /** Consumer auth for tenant routes — required when demoMode is not true. */
   resolveConsumerUser?: (req: {
     headers: Record<string, string | string[] | undefined>;
   }) => Promise<string | null> | string | null;
@@ -36,6 +61,27 @@ const registeredSlugs = new WeakMap<Express, Set<string>>();
 
 function tenantPath(slug: string): string {
   return `/t/${slug}`;
+}
+
+function serializeHostApp(app: PlatformApp, plan: ReturnType<typeof getPlan>, baseUrl: string) {
+  return {
+    id: app.id,
+    slug: app.slug,
+    displayName: app.displayName,
+    publishableKey: app.publishableKey,
+    fundingPolicy: app.fundingPolicy,
+    status: app.status,
+    tenantBaseUrl: `${baseUrl.replace(/\/$/, '')}${tenantPath(app.slug)}`,
+    usage: appUsageSummary(app, plan),
+  };
+}
+
+async function resolveTenantFundingPolicy(
+  store: PlatformStore,
+  platformApp: PlatformApp,
+): Promise<PlatformApp['fundingPolicy']> {
+  const live = await store.findAppBySlug(platformApp.slug);
+  return live?.fundingPolicy ?? platformApp.fundingPolicy;
 }
 
 function extractSecretKey(req: Request): string | null {
@@ -65,16 +111,15 @@ function registerTenantRouter(
 
   const tenantBase = `${options.baseUrl.replace(/\/$/, '')}${tenantPath(platformApp.slug)}`;
   const router = express.Router();
-  router.use(express.json());
-
-  const createBridgeFactory = createServerBridgeFactory({
-    appId: platformApp.slug,
-    baseUrl: tenantBase,
-    getAuthHeaders: () => ({}),
-    encryptionSecret: platformApp.encryptionSecret,
-    fundingPolicy: platformApp.fundingPolicy,
-    storageKind: 'memory',
-  });
+  router.use(express.json({ limit: options.jsonBodyLimit ?? '256kb' }));
+  const apiPrefix = '/account-bridge';
+  const wallet = options.tenantWallet;
+  const initialFundingPolicy = platformApp.fundingPolicy;
+  const hostKeyPool =
+    options.tenantHostKeyPool ??
+    (wallet && (initialFundingPolicy.mode === 'wallet' || initialFundingPolicy.mode === 'auto')
+      ? createHostKeyPool({ providers: resolveHostProviders() })
+      : undefined);
 
   async function assertTenantAccess(req: Request, app: PlatformApp): Promise<boolean> {
     const secret = extractSecretKey(req);
@@ -90,57 +135,100 @@ function registerTenantRouter(
   }
 
   router.use(async (req, res, next) => {
-    if (platformApp.status !== 'active') {
+    const liveApp = await options.store.findAppBySlug(platformApp.slug);
+    if (!liveApp) {
+      res.status(404).json({ error: 'Tenant app not found' });
+      return;
+    }
+    if (liveApp.status !== 'active') {
       res.status(403).json({ error: 'App suspended' });
       return;
     }
-    const host = await options.store.findHostById(platformApp.hostId);
-    if (!host || host.planStatus === 'canceled') {
+    const host = await options.store.findHostById(liveApp.hostId);
+    if (!host || host.planStatus === 'canceled' || host.planStatus === 'past_due') {
       res.status(403).json({ error: 'Host subscription inactive' });
       return;
     }
-    if (!(await assertTenantAccess(req, platformApp))) {
+    if (!(await assertTenantAccess(req, liveApp))) {
       res.status(401).json({
         error: 'Missing or invalid app credentials. Use X-Account-Bridge-Publishable-Key or Bearer ab_sk_…',
       });
       return;
     }
-    if (!planAllowsRequest(host.planId, platformApp.monthlyRequestCount)) {
+    const hostUsage = await hostMonthlyRequestCount(options.store, host.id);
+    if (!planAllowsRequest(host.planId, hostUsage)) {
       res.status(429).json({ error: 'Monthly request limit reached. Upgrade your plan.' });
       return;
     }
-    await options.store.incrementAppUsage(platformApp.id);
+
+    let usageRecorded = false;
+    res.on('finish', () => {
+      if (usageRecorded || res.statusCode >= 400) return;
+      usageRecorded = true;
+      void options.store.incrementAppUsage(liveApp.id);
+    });
     next();
   });
 
-  const resolveUser =
-    options.resolveConsumerUser ??
-    ((req: { headers: Record<string, string | string[] | undefined> }) => {
-      const auth = String(req.headers.authorization ?? '');
-      if (auth.startsWith('Bearer ') && !auth.startsWith('Bearer ab_sk_')) {
-        return auth.slice('Bearer '.length).trim() || null;
-      }
-      const demo = req.headers['x-demo-user'];
-      if (typeof demo === 'string' && demo.trim()) return demo.trim();
-      return null;
+  router.get('/health', async (_req, res) => {
+    const liveApp = await options.store.findAppBySlug(platformApp.slug);
+    res.json({
+      ok: true,
+      slug: platformApp.slug,
+      tenantBaseUrl: tenantBase,
+      walletEnabled: Boolean(wallet),
+      fundingMode: liveApp?.fundingPolicy.mode ?? initialFundingPolicy.mode,
     });
+  });
+
+  const createBridgeFactory = createServerBridgeFactory({
+    appId: platformApp.slug,
+    baseUrl: tenantBase,
+    getAuthHeaders: () => ({}),
+    encryptionSecret: platformApp.encryptionSecret,
+    fundingPolicy: platformApp.fundingPolicy,
+    storageKind: 'memory',
+  });
+
+  const resolveUser = options.resolveConsumerUser ?? resolveDemoConsumerUser;
+
+  const resolveFundingPolicy = () => resolveTenantFundingPolicy(options.store, platformApp);
 
   mountAccountBridgeHostRoutes({
     app: router as unknown as Express,
     appId: platformApp.slug,
+    apiPrefix,
     createBridge: (userId) => createBridgeFactory(userId),
     resolveUser,
-    fundingPolicy: platformApp.fundingPolicy,
+    fundingPolicy: initialFundingPolicy,
+    resolveFundingPolicy,
     enforceConsumerCredits: true,
+    wallet,
+    hostKeyPool,
   });
 
   mountAccountBridgeGateway(router as unknown as Express, {
     appId: platformApp.slug,
     createBridge: (userId) => createBridgeFactory(userId),
     resolveUser,
-    fundingPolicy: platformApp.fundingPolicy,
+    fundingPolicy: initialFundingPolicy,
+    resolveFundingPolicy,
     enforceConsumerCredits: true,
+    wallet,
+    hostKeyPool,
   });
+
+  if (wallet) {
+    mountAccountBridgeWalletRoutes({
+      app: router as unknown as Express,
+      apiPrefix,
+      appId: platformApp.slug,
+      wallet,
+      fundingPolicy: initialFundingPolicy,
+      resolveUser,
+      enforceConsumerCredits: true,
+    });
+  }
 
   rootApp.use(tenantPath(platformApp.slug), router);
 }
@@ -156,9 +244,23 @@ async function resolveHostFromRequest(
 }
 
 export function mountPlatformService(options: MountPlatformServiceOptions): void {
+  const demoMode = options.demoMode === true;
+  if (!demoMode && !options.resolveConsumerUser) {
+    throw new Error(
+      'mountPlatformService: resolveConsumerUser is required when demoMode is not true',
+    );
+  }
+
   const { app, store, baseUrl } = options;
   const platformPrefix = '/platform/v1';
-  const json = express.json();
+  const jsonBodyLimit = options.jsonBodyLimit ?? '256kb';
+  const json = express.json({ limit: jsonBodyLimit });
+  const signupLimit = createMemoryRateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: options.signupRateLimitPerHour ?? (demoMode ? 20 : 6),
+    keyFn: clientIp,
+    message: 'Too many signup attempts from this address. Try again later.',
+  });
 
   app.post(
     `${platformPrefix}/billing/webhook`,
@@ -187,7 +289,7 @@ export function mountPlatformService(options: MountPlatformServiceOptions): void
         }
         res.json({ received: true, ...result });
       } catch (err) {
-        res.status(400).json({ error: err instanceof Error ? err.message : 'Webhook failed' });
+        res.status(400).json({ error: platformClientError(err, 'Webhook failed') });
       }
     },
   );
@@ -200,14 +302,17 @@ export function mountPlatformService(options: MountPlatformServiceOptions): void
     res.json({ plans: Object.values(PLATFORM_PLANS) });
   });
 
-  app.post(`${platformPrefix}/signup`, json, async (req, res) => {
+  app.post(`${platformPrefix}/signup`, signupLimit, json, async (req, res) => {
     try {
       const { email, name } = req.body as { email?: string; name?: string };
       if (!email?.trim()) {
         res.status(400).json({ error: 'email required' });
         return;
       }
-      const result = await store.createHost({ email, name: name ?? '' });
+      const result = await store.createHost({
+        email: validatePlatformEmail(email),
+        name: validateHostDisplayName(name ?? ''),
+      });
       res.status(201).json({
         host: {
           id: result.host.id,
@@ -220,7 +325,7 @@ export function mountPlatformService(options: MountPlatformServiceOptions): void
         message: 'Save hostToken — it is shown once.',
       });
     } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : 'Signup failed' });
+      res.status(400).json({ error: platformClientError(err, 'Signup failed') });
     }
   });
 
@@ -237,6 +342,10 @@ export function mountPlatformService(options: MountPlatformServiceOptions): void
     }
     const plan = getPlan(host.planId);
     const apps = await store.listAppsForHost(host.id);
+    const usage = usageFromCount(
+      apps.reduce((sum, app) => sum + app.monthlyRequestCount, 0),
+      plan.maxMonthlyRequests,
+    );
     res.json({
       host: {
         id: host.id,
@@ -246,17 +355,59 @@ export function mountPlatformService(options: MountPlatformServiceOptions): void
         planStatus: host.planStatus,
       },
       plan,
-      apps: apps.map((a) => ({
-        id: a.id,
-        slug: a.slug,
-        displayName: a.displayName,
-        publishableKey: a.publishableKey,
-        fundingPolicy: a.fundingPolicy,
-        status: a.status,
-        monthlyRequestCount: a.monthlyRequestCount,
-        tenantBaseUrl: `${baseUrl.replace(/\/$/, '')}${tenantPath(a.slug)}`,
-      })),
+      usage,
+      apps: apps.map((a) => serializeHostApp(a, plan, baseUrl)),
     });
+  });
+
+  app.patch(`${platformPrefix}/apps/:slug`, json, async (req, res) => {
+    const ctx = await resolveHostFromRequest(store, req);
+    if (!ctx) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    try {
+      const { displayName, fundingPolicy } = req.body as {
+        displayName?: string;
+        fundingPolicy?: PlatformApp['fundingPolicy'];
+      };
+      const host = await store.findHostById(ctx.hostId);
+      if (!host) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const updated = await store.updateApp({
+        hostId: ctx.hostId,
+        slug: String(req.params.slug),
+        displayName:
+          displayName !== undefined ? validateAppDisplayName(displayName, String(req.params.slug)) : undefined,
+        fundingPolicy: parseFundingPolicyInput(fundingPolicy),
+      });
+      const plan = getPlan(host.planId);
+      res.json({ app: serializeHostApp(updated, plan, baseUrl) });
+    } catch (err) {
+      res.status(400).json({ error: platformClientError(err, 'Update app failed') });
+    }
+  });
+
+  app.post(`${platformPrefix}/apps/:slug/rotate-secret`, json, async (req, res) => {
+    const ctx = await resolveHostFromRequest(store, req);
+    if (!ctx) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    try {
+      const result = await store.rotateAppSecret(ctx.hostId, String(req.params.slug));
+      const host = await store.findHostById(ctx.hostId);
+      const plan = host ? getPlan(host.planId) : getPlan('free');
+      res.json({
+        app: serializeHostApp(result.app, plan, baseUrl),
+        secretKey: result.secretKey,
+        message: 'Save secretKey — previous secret is invalid.',
+      });
+    } catch (err) {
+      res.status(400).json({ error: platformClientError(err, 'Rotate secret failed') });
+    }
   });
 
   app.post(`${platformPrefix}/apps`, json, async (req, res) => {
@@ -279,22 +430,18 @@ export function mountPlatformService(options: MountPlatformServiceOptions): void
         hostId: ctx.hostId,
         slug,
         displayName: displayName ?? slug,
-        fundingPolicy,
+        fundingPolicy: parseFundingPolicyInput(fundingPolicy),
       });
       registerTenantRouter(app, result.app, options);
+      const host = await store.findHostById(ctx.hostId);
+      const plan = host ? getPlan(host.planId) : getPlan('free');
       res.status(201).json({
-        app: {
-          id: result.app.id,
-          slug: result.app.slug,
-          displayName: result.app.displayName,
-          publishableKey: result.app.publishableKey,
-          tenantBaseUrl: `${baseUrl.replace(/\/$/, '')}${tenantPath(result.app.slug)}`,
-        },
+        app: serializeHostApp(result.app, plan, baseUrl),
         secretKey: result.secretKey,
         message: 'Save secretKey — it is shown once.',
       });
     } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : 'Create app failed' });
+      res.status(400).json({ error: platformClientError(err, 'Create app failed') });
     }
   });
 
@@ -326,7 +473,7 @@ export function mountPlatformService(options: MountPlatformServiceOptions): void
       });
       res.json(checkout);
     } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : 'Checkout failed' });
+      res.status(400).json({ error: platformClientError(err, 'Checkout failed') });
     }
   });
 }

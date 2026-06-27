@@ -26,4 +26,6 @@ export interface AccountBridgeEmbedConfig {
   suggestedPrompts?: readonly string[];
   fundingPolicy?: FundingPolicy;
   walletApiBaseUrl?: string;
+  /** Platform SaaS publishable key (`ab_pk_…`) for hosted multi-tenant API */
+  publishableKey?: string;
 }

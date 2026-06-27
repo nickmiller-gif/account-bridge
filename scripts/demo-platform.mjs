@@ -52,7 +52,12 @@ spawnNamed(
   'node',
   ['server.mjs'],
   path.join(root, 'examples/platform-service'),
-  { PORT: String(platformPort), HOST: '127.0.0.1', PLATFORM_SEED_DEMO: '1' },
+  {
+    PORT: String(platformPort),
+    HOST: '127.0.0.1',
+    PLATFORM_SEED_DEMO: '1',
+    DEMO_CORS_ORIGINS: `http://127.0.0.1:${dashboardPort},http://localhost:${dashboardPort},http://127.0.0.1:5175,http://localhost:5175`,
+  },
 );
 
 spawnNamed(

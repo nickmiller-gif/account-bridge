@@ -103,7 +103,11 @@ function resolveEmbedConfig(
       copilotProviderId: undefined,
       introTitle: 'Hosted Account Bridge',
       introDescription:
-        'Multi-tenant SaaS — your app embed uses a publishable key; consumers bring their own API keys.',
+        'Multi-tenant SaaS — publishable key + app credits (mock AI when demo platform is running).',
+      fundingPolicy: {
+        mode: 'auto' as const,
+        wallet: { enabled: true },
+      },
     };
   }
 

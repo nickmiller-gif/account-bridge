@@ -6,7 +6,17 @@ import type {
   PlatformApp,
   PlatformHost,
   PlatformStore,
+  RotateAppSecretResult,
+  UpdateAppParams,
 } from './types.js';
+import {
+  normalizeAppSlug,
+  parseFundingPolicyInput,
+  validateAppDisplayName,
+  validateAppSlug,
+  validateHostDisplayName,
+  validatePlatformEmail,
+} from './validation.js';
 import {
   generateEncryptionSecret,
   generateHostToken,
@@ -15,17 +25,9 @@ import {
   hashApiKey,
   newPlatformId,
 } from './apiKeys.js';
+import { assertFundingPolicyAllowed } from './fundingPolicy.js';
 
-function normalizeSlug(slug: string): string {
-  return slug
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-}
-
-export function memoryPlatformStore(): PlatformStore {
+export function memoryPlatformStore(): PlatformStore & PlatformStoreSnapshotOps {
   const hosts = new Map<string, PlatformHost>();
   const hostByEmail = new Map<string, string>();
   const hostByTokenHash = new Map<string, string>();
@@ -34,17 +36,34 @@ export function memoryPlatformStore(): PlatformStore {
   const appByPublishable = new Map<string, string>();
   const appBySecretHash = new Map<string, string>();
 
-  return {
+  function rebuildIndexes(): void {
+    hostByEmail.clear();
+    hostByTokenHash.clear();
+    appBySlug.clear();
+    appByPublishable.clear();
+    appBySecretHash.clear();
+    for (const host of hosts.values()) {
+      hostByEmail.set(host.email, host.id);
+      hostByTokenHash.set(host.hostTokenHash, host.id);
+    }
+    for (const app of apps.values()) {
+      appBySlug.set(app.slug, app.id);
+      appByPublishable.set(app.publishableKey, app.id);
+      appBySecretHash.set(app.secretKeyHash, app.id);
+    }
+  }
+
+  const store: PlatformStore & PlatformStoreSnapshotOps = {
     async createHost(params: CreateHostParams): Promise<CreateHostResult> {
-      const email = params.email.trim().toLowerCase();
+      const email = validatePlatformEmail(params.email);
       if (hostByEmail.has(email)) {
-        throw new Error('An account with this email already exists.');
+        throw new Error('Unable to create account. Sign in or use a different email.');
       }
       const hostToken = generateHostToken();
       const host: PlatformHost = {
         id: newPlatformId('host'),
         email,
-        name: params.name.trim() || email.split('@')[0] || 'Host',
+        name: validateHostDisplayName(params.name) || email.split('@')[0] || 'Host',
         planId: 'free',
         planStatus: 'active',
         hostTokenHash: hashApiKey(hostToken),
@@ -80,8 +99,7 @@ export function memoryPlatformStore(): PlatformStore {
         throw new Error('Subscription inactive. Update billing to create apps.');
       }
 
-      const slug = normalizeSlug(params.slug);
-      if (!slug) throw new Error('App slug is required.');
+      const slug = validateAppSlug(params.slug);
       if (appBySlug.has(slug)) throw new Error('App slug already taken.');
 
       const hostApps = [...apps.values()].filter((a) => a.hostId === params.hostId);
@@ -91,16 +109,19 @@ export function memoryPlatformStore(): PlatformStore {
         throw new Error(`Plan limit: ${plan.maxApps} app(s). Upgrade to add more.`);
       }
 
+      const fundingPolicy = parseFundingPolicyInput(params.fundingPolicy) ?? { mode: 'byok' };
+      assertFundingPolicyAllowed(plan, fundingPolicy);
+
       const secretKey = generateSecretKey();
       const app: PlatformApp = {
         id: newPlatformId('app'),
         hostId: params.hostId,
         slug,
-        displayName: params.displayName.trim() || slug,
+        displayName: validateAppDisplayName(params.displayName, slug),
         publishableKey: generatePublishableKey(),
         secretKeyHash: hashApiKey(secretKey),
         encryptionSecret: generateEncryptionSecret(),
-        fundingPolicy: params.fundingPolicy ?? { mode: 'byok' },
+        fundingPolicy,
         status: 'active',
         monthlyRequestCount: 0,
         createdAt: new Date().toISOString(),
@@ -113,12 +134,60 @@ export function memoryPlatformStore(): PlatformStore {
       return { app, secretKey };
     },
 
+    async updateApp(params: UpdateAppParams): Promise<PlatformApp> {
+      const host = hosts.get(params.hostId);
+      if (!host) throw new Error('Host not found');
+
+      const slug = validateAppSlug(params.slug);
+      const appId = appBySlug.get(slug);
+      if (!appId) throw new Error('App not found');
+      const app = apps.get(appId);
+      if (!app || app.hostId !== params.hostId) throw new Error('App not found');
+
+      const { getPlan } = await import('./plans.js');
+      const plan = getPlan(host.planId);
+      const fundingPolicy =
+        params.fundingPolicy !== undefined
+          ? (parseFundingPolicyInput(params.fundingPolicy) ?? app.fundingPolicy)
+          : app.fundingPolicy;
+      assertFundingPolicyAllowed(plan, fundingPolicy);
+
+      const updated: PlatformApp = {
+        ...app,
+        displayName:
+          params.displayName !== undefined
+            ? validateAppDisplayName(params.displayName, app.slug)
+            : app.displayName,
+        fundingPolicy,
+      };
+      apps.set(appId, updated);
+      return updated;
+    },
+
+    async rotateAppSecret(hostId: string, slug: string): Promise<RotateAppSecretResult> {
+      const normalized = validateAppSlug(slug);
+      const appId = appBySlug.get(normalized);
+      if (!appId) throw new Error('App not found');
+      const app = apps.get(appId);
+      if (!app || app.hostId !== hostId) throw new Error('App not found');
+
+      appBySecretHash.delete(app.secretKeyHash);
+      const secretKey = generateSecretKey();
+      const updated: PlatformApp = {
+        ...app,
+        secretKeyHash: hashApiKey(secretKey),
+      };
+      apps.set(appId, updated);
+      appBySecretHash.set(updated.secretKeyHash, appId);
+      return { app: updated, secretKey };
+    },
+
     async listAppsForHost(hostId: string): Promise<PlatformApp[]> {
       return [...apps.values()].filter((a) => a.hostId === hostId);
     },
 
     async findAppBySlug(slug: string): Promise<PlatformApp | null> {
-      const id = appBySlug.get(normalizeSlug(slug));
+      const id = appBySlug.get(normalizeAppSlug(slug));
       return id ? (apps.get(id) ?? null) : null;
     },
 
@@ -141,5 +210,36 @@ export function memoryPlatformStore(): PlatformStore {
     async listAllApps(): Promise<PlatformApp[]> {
       return [...apps.values()];
     },
+
+    exportSnapshot(): PlatformStoreSnapshot {
+      return {
+        hosts: [...hosts.values()],
+        apps: [...apps.values()],
+      };
+    },
+
+    importSnapshot(snapshot: PlatformStoreSnapshot): void {
+      hosts.clear();
+      apps.clear();
+      for (const host of snapshot.hosts) {
+        hosts.set(host.id, host);
+      }
+      for (const app of snapshot.apps) {
+        apps.set(app.id, app);
+      }
+      rebuildIndexes();
+    },
   };
+
+  return store;
+}
+
+export interface PlatformStoreSnapshot {
+  hosts: PlatformHost[];
+  apps: PlatformApp[];
+}
+
+export interface PlatformStoreSnapshotOps {
+  exportSnapshot(): PlatformStoreSnapshot;
+  importSnapshot(snapshot: PlatformStoreSnapshot): void;
 }

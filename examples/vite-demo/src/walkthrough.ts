@@ -204,7 +204,7 @@ export const WALKTHROUGH_SCENARIOS: WalkthroughScenario[] = [
     youWillSee: [
       'Tenant URL /t/{slug}/account-bridge/*',
       'Platform REST /platform/v1/signup · /apps · /me',
-      'Monthly request limits per plan',
+      'Wallet credits + mock AI chat (npm run demo -- --with-platform)',
     ],
   },
 ];

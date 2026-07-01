@@ -1,6 +1,24 @@
 # Changelog
 
-# Changelog
+## 3.4.0 — 2026-07-01
+
+Optional integration — ship Account Bridge dark and flip it on with config.
+
+### Added
+
+- **`enabled` prop on `AccountBridgeEmbed`** — `enabled={false}` renders `children` untouched:
+  no bridge, no storage, no gating. Hosts can mount the embed unconditionally behind a flag
+  that defaults off.
+- **`mountOptionalAccountBridge`** (`@account-bridge/web`, also on the script bundle) — mounts a
+  bridge custom element only when a host feature flag parses truthy; disabled is a strict no-op
+  (no element registration, no DOM). Returns `{ mounted, element, reason, unmount }`.
+- **`isAccountBridgeEnabled`** — env-var flag parser with opt-in semantics: absent/empty and
+  `0/false/no/off/disabled` are off; any other value (including a bundle URL) is on.
+- **Docs** — [`docs/optional-integration.md`](docs/optional-integration.md): the three optional
+  paths (React `enabled` prop, imperative mount, runtime-loaded bundle with no build-time
+  dependency) plus the R2 ecosystem `VITE_ACCOUNT_BRIDGE_EMBED_URL` convention.
+- **Tests** — `optional.test.ts` (flag parsing, no-op mount, attribute wiring),
+  `optionalEmbed.test.ts` (disabled embed renders children verbatim).
 
 ## 3.3.0 — 2026-06-24
 

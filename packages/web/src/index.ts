@@ -20,6 +20,15 @@ export {
   resolveAuthHeaders,
 } from './bootstrap.js';
 
+export {
+  isAccountBridgeEnabled,
+  mountOptionalAccountBridge,
+  type AccountBridgeElementTag,
+  type MountOptionalAccountBridgeOptions,
+  type OptionalAccountBridgeHandle,
+  type OptionalFlagValue,
+} from './optional.js';
+
 export { ensureAccountBridgeTheme, themeClassFor, providerIconLabel } from './theme.js';
 
 export {

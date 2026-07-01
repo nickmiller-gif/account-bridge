@@ -65,6 +65,12 @@ export interface OptionalAccountBridgeHandle {
   unmount(): void;
 }
 
+/**
+ * Attribute names are host-supplied config; skip anything that isn't a plain
+ * HTML attribute name instead of letting `setAttribute` throw mid-mount.
+ */
+const VALID_ATTRIBUTE_NAME = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
+
 const noopHandle = (reason: OptionalAccountBridgeHandle['reason']): OptionalAccountBridgeHandle => ({
   mounted: false,
   element: null,
@@ -104,6 +110,7 @@ export function mountOptionalAccountBridge(
   const el = doc.createElement(options.element ?? 'account-bridge-embed');
   for (const [name, value] of Object.entries(options.attributes ?? {})) {
     if (value === undefined || value === false) continue;
+    if (!VALID_ATTRIBUTE_NAME.test(name)) continue;
     el.setAttribute(name, value === true ? '' : String(value));
   }
   target.appendChild(el);

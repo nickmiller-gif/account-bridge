@@ -89,6 +89,30 @@ describe('mountOptionalAccountBridge', () => {
     }
   });
 
+  it('skips invalid attribute names instead of throwing', () => {
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    try {
+      const handle = mountOptionalAccountBridge({
+        enabled: true,
+        target,
+        register: false,
+        attributes: {
+          'app-id': 'demo-app',
+          '"><img onerror=x>': 'nope',
+          '': 'nope',
+        },
+      });
+
+      expect(handle.mounted).toBe(true);
+      expect(handle.element?.getAttribute('app-id')).toBe('demo-app');
+      expect(handle.element?.attributes.length).toBe(1);
+      handle.unmount();
+    } finally {
+      target.remove();
+    }
+  });
+
   it('resolves string targets via selector and supports other element tags', () => {
     const target = document.createElement('div');
     target.id = 'bridge-slot';

@@ -19,6 +19,12 @@ describe('isAccountBridgeEnabled', () => {
     }
   });
 
+  it('treats stringified missing values from sloppy env wiring as disabled', () => {
+    for (const value of ['undefined', 'null', 'None', 'NULL']) {
+      expect(isAccountBridgeEnabled(value)).toBe(false);
+    }
+  });
+
   it('treats booleans and numbers literally', () => {
     expect(isAccountBridgeEnabled(true)).toBe(true);
     expect(isAccountBridgeEnabled(false)).toBe(false);
@@ -101,6 +107,8 @@ describe('mountOptionalAccountBridge', () => {
           'app-id': 'demo-app',
           '"><img onerror=x>': 'nope',
           '': 'nope',
+          onclick: 'alert(1)',
+          ONLoad: 'alert(1)',
         },
       });
 

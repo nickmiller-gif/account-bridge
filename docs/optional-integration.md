@@ -6,8 +6,9 @@ off. This guide covers the three integration paths.
 
 ## Semantics
 
-- **Off is the default.** Absent flags, empty strings, and `'0' | 'false' | 'no' | 'off' | 'disabled'`
-  all mean disabled (`isAccountBridgeEnabled`).
+- **Off is the default.** Absent flags, empty strings, `'0' | 'false' | 'no' | 'off' | 'disabled'`,
+  and stringified missing values (`'undefined' | 'null' | 'none'`) all mean disabled
+  (`isAccountBridgeEnabled`).
 - **Off is a strict no-op.** No custom elements registered, no DOM rendered, no IndexedDB opened,
   no network calls — gated features render exactly as if Account Bridge were never installed.
 - **On is one config value.** A single env var (commonly the embed bundle URL itself) flips it.

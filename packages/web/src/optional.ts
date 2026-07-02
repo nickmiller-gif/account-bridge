@@ -6,16 +6,28 @@ import { registerAccountBridgeElements } from './elements.js';
  */
 export type OptionalFlagValue = boolean | string | number | null | undefined;
 
-const FALSY_FLAGS = new Set(['', '0', 'false', 'no', 'off', 'disabled']);
+const FALSY_FLAGS = new Set([
+  '',
+  '0',
+  'false',
+  'no',
+  'off',
+  'disabled',
+  // Sloppy env interpolation stringifies missing values — keep those OFF.
+  'undefined',
+  'null',
+  'none',
+]);
 
 /**
  * Parse a host feature flag for Account Bridge.
  *
- * Opt-in semantics: absent (`null`/`undefined`) and explicit falsy strings
- * (`''`, `'0'`, `'false'`, `'no'`, `'off'`, `'disabled'`, case-insensitive)
- * are disabled. Any other non-empty value — `'true'`, `'1'`, or a config
- * value like an embed URL — enables the bridge, so "set the env var to turn
- * it on" works without a separate boolean flag.
+ * Opt-in semantics: absent (`null`/`undefined`), explicit falsy strings
+ * (`''`, `'0'`, `'false'`, `'no'`, `'off'`, `'disabled'`, case-insensitive),
+ * and stringified missing values (`'undefined'`, `'null'`, `'none'`) are
+ * disabled. Any other non-empty value — `'true'`, `'1'`, or a config value
+ * like an embed URL — enables the bridge, so "set the env var to turn it on"
+ * works without a separate boolean flag.
  */
 export function isAccountBridgeEnabled(value: OptionalFlagValue): boolean {
   if (typeof value === 'boolean') return value;
@@ -67,9 +79,13 @@ export interface OptionalAccountBridgeHandle {
 
 /**
  * Attribute names are host-supplied config; skip anything that isn't a plain
- * HTML attribute name instead of letting `setAttribute` throw mid-mount.
+ * HTML attribute name instead of letting `setAttribute` throw mid-mount, and
+ * refuse `on*` event-handler names — the bridge elements never use them, so
+ * allowing them through would only ever hand a script sink to whatever built
+ * the attributes object.
  */
 const VALID_ATTRIBUTE_NAME = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
+const EVENT_HANDLER_NAME = /^on/i;
 
 const noopHandle = (reason: OptionalAccountBridgeHandle['reason']): OptionalAccountBridgeHandle => ({
   mounted: false,
@@ -110,7 +126,7 @@ export function mountOptionalAccountBridge(
   const el = doc.createElement(options.element ?? 'account-bridge-embed');
   for (const [name, value] of Object.entries(options.attributes ?? {})) {
     if (value === undefined || value === false) continue;
-    if (!VALID_ATTRIBUTE_NAME.test(name)) continue;
+    if (!VALID_ATTRIBUTE_NAME.test(name) || EVENT_HANDLER_NAME.test(name)) continue;
     el.setAttribute(name, value === true ? '' : String(value));
   }
   target.appendChild(el);

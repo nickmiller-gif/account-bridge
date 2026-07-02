@@ -8,3 +8,5 @@ export {
   AccountBridgeEmbedElement,
   registerAccountBridgeElements,
 } from './elements.js';
+
+export { isAccountBridgeEnabled, mountOptionalAccountBridge } from './optional.js';

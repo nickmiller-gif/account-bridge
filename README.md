@@ -2,6 +2,13 @@
 
 Generic **bring-your-own-key (BYOK)** + **app credits wallet** plugin for any app. End users fund AI usage—the host developer does not pay for model calls.
 
+## What's new in v3.4
+
+- **Optional integration** — ship dark, flip on with config: `enabled` prop on `AccountBridgeEmbed` (renders children untouched when off), `mountOptionalAccountBridge` + `isAccountBridgeEnabled` in `@account-bridge/web`
+- **Runtime-loaded hosts** — flag-gated `<script type="module">` recipe for apps with no build-time dependency on this repo (R2 ecosystem convention: `VITE_ACCOUNT_BRIDGE_EMBED_URL`)
+
+See [`docs/optional-integration.md`](docs/optional-integration.md) and [`CHANGELOG.md`](CHANGELOG.md#340--2026-07-01).
+
 ## What's new in v3.3
 
 - **Production guardrails** — `demoMode: false` requires real `resolveConsumerUser`; signup rate limits; sanitized errors

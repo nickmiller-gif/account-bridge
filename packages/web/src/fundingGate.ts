@@ -22,6 +22,14 @@ function fundingPolicyFromConfig(config: AccountBridgeEmbedConfig): FundingPolic
   return config.fundingPolicy ?? { mode: 'byok' };
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 export async function embedFundingReady(
   bridge: AccountBridge,
   config: AccountBridgeEmbedConfig,
@@ -127,8 +135,8 @@ export function mountFundingGate(
     walletUnsub = walletController.subscribe((state) => {
       wrap.innerHTML = state.loading
         ? '<p>Loading balance…</p>'
-        : `<p class="ab-wallet__balance">${state.formattedBalance} credits</p>
-           ${state.error ? `<p role="alert">${state.error}</p>` : ''}`;
+        : `<p class="ab-wallet__balance">${escapeHtml(state.formattedBalance)} credits</p>
+           ${state.error ? `<p role="alert">${escapeHtml(state.error)}</p>` : ''}`;
       if (!state.loading && state.packs.length) {
         const list = document.createElement('div');
         list.className = 'ab-wallet__packs';

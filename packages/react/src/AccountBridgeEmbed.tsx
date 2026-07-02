@@ -24,6 +24,13 @@ export interface AccountBridgeEmbedProps {
   /** Unique per host app — isolates consumer credentials (`centralr2-core`, `r2works`, …) */
   appId: string;
   /**
+   * Optional-integration flag. When `false`, renders `children` untouched —
+   * no bridge is created, no storage is opened, and nothing is gated — so hosts
+   * can ship Account Bridge behind a feature flag that defaults off.
+   * @default true
+   */
+  enabled?: boolean;
+  /**
    * `local` — browser encrypted storage (demos, offline tools).
    * `remote` — host REST + gateway (production Lovable / custom backends).
    */
@@ -129,8 +136,19 @@ function useEmbedBridge(props: AccountBridgeEmbedProps) {
 
 /**
  * Drop-in Account Bridge for any host app — settings, credit gate, copilot, or all.
+ *
+ * Pass `enabled={false}` to disable the integration entirely: `children` render
+ * untouched and no bridge or storage is created.
  */
 export function AccountBridgeEmbed(props: AccountBridgeEmbedProps) {
+  const { enabled = true, children } = props;
+  if (!enabled) {
+    return <>{children}</>;
+  }
+  return <AccountBridgeEmbedActive {...props} />;
+}
+
+function AccountBridgeEmbedActive(props: AccountBridgeEmbedProps) {
   const bridge = useEmbedBridge(props);
   const {
     mode = 'settings',

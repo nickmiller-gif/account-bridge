@@ -8,7 +8,7 @@
     "examples/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build -w @account-bridge/core && npm run build -w @account-bridge/platform && npm run build -w @account-bridge/billing && npm run build -w @account-bridge/ui && npm run build -w @account-bridge/gateway && npm run build -w @account-bridge/adapters && npm run build -w @account-bridge/server && npm run build -w @account-bridge/react && npm run build -w @account-bridge/web && npm run build -w @account-bridge/overlay && npm run build -w @account-bridge/proxy && npm run build -w @account-bridge/mcp && npm run build -w account-bridge-node-proxy && npm run build -w account-bridge-platform-dashboard && npm run build -w account-bridge-vanilla-demo && npm run build -w account-bridge-vite-demo",
     "test": "vitest run",
     "smoke": "node scripts/smoke-integration.mjs && node scripts/smoke-file-storage.mjs && node scripts/smoke-wallet.mjs && node scripts/smoke-wallet-host.mjs && node scripts/smoke-proxy.mjs && node scripts/smoke-platform.mjs",
     "smoke:wallet-host": "node scripts/smoke-wallet-host.mjs",
